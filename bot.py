@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import sqlite3
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
@@ -19,7 +20,7 @@ import config
 import database_utils as db
 
 # إعداد التسجيل
-logging.basicConfig(level=logging.INFO, format=\'%(asctime)s - %(name)s - %(levelname)s - %(message)s\')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # تهيئة البوت والديسباتشر
@@ -78,9 +79,9 @@ async def handle_account(message: Message):
         # إضافة المستخدم إذا لم يكن موجودًا (احتياطي)
         db.add_or_update_user(user_id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
         user_data = db.get_user(user_id)
-        if not user_data: # إذا فشلت الإضافة لسبب ما
-             await message.answer("حدث خطأ أثناء جلب بيانات حسابك. يرجى المحاولة مرة أخرى.")
-             return
+        if not user_data:
+            await message.answer("حدث خطأ أثناء جلب بيانات حسابك. يرجى المحاولة مرة أخرى.")
+            return
 
     subscription_type = user_data["subscription_type"]
     requests_remaining = user_data["requests_remaining"]
@@ -101,11 +102,10 @@ async def handle_account(message: Message):
     expiry_info = ""
     if expiry_date_str:
         try:
-            expiry_date = datetime.strptime(expiry_date_str, 	'%Y-%m-%d %H:%M:%S.%f	')
-            expiry_info = f"\nتنتهي صلاحية الخطة الحالية في: {expiry_date.strftime(	'%Y-%m-%d	')}"
+            expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d %H:%M:%S.%f')
+            expiry_info = f"\nتنتهي صلاحية الخطة الحالية في: {expiry_date.strftime('%Y-%m-%d')}"
         except ValueError:
-             expiry_info = f"\nتاريخ انتهاء الصلاحية: {expiry_date_str} (تنسيق غير متوقع)"
-
+            expiry_info = f"\nتاريخ انتهاء الصلاحية: {expiry_date_str} (تنسيق غير متوقع)"
 
     account_info = f"""
     👤 **حسابي**
@@ -177,7 +177,7 @@ async def handle_text_message(message: Message, state: FSMContext):
     if not user_data:
         db.add_or_update_user(user_id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
         user_data = db.get_user(user_id)
-        if not user_data: # إذا فشلت الإضافة
+        if not user_data:
             await message.reply("حدث خطأ في معالجة طلبك. يرجى المحاولة مرة أخرى.")
             return
 
@@ -190,23 +190,19 @@ async def handle_text_message(message: Message, state: FSMContext):
     selected_model_name = db.get_selected_model(user_id)
     context = db.get_user_context(user_id) or ""
 
-    # 4. استدعاء نموذج الذكاء الاصطناعي المناسب (سيتم إضافة المزيد من النماذج لاحقًا)
+    # 4. استدعاء نموذج الذكاء الاصطناعي المناسب
     response_text = "عذرًا، حدث خطأ أثناء معالجة طلبك."
     try:
         # عرض رسالة "جارٍ الكتابة..."
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
 
         # --- منطق اختيار واستدعاء النموذج --- #
-        # هذا مثال مبسط، سيتم توسيعه ليشمل جميع النماذج المطلوبة
         if "GPT" in selected_model_name.upper() and config.OPENAI_API_KEY:
-            # استخدام OpenAI API
-            model_to_use = selected_model_name # أو تعيين نموذج محدد مثل "gpt-4o-mini"
+            model_to_use = selected_model_name
             messages = []
-            if context: # إضافة السياق إذا كان موجودًا
-                 # تقسيم السياق إلى رسائل المستخدم والردود السابقة (هذا تبسيط)
-                 # في تطبيق حقيقي، قد تحتاج إلى تخزين المحادثة بشكل أكثر تفصيلاً
-                 messages.append({"role": "system", "content": "You are a helpful AI assistant."})
-                 messages.append({"role": "user", "content": context}) # مثال بسيط للسياق
+            if context:
+                messages.append({"role": "system", "content": "You are a helpful AI assistant."})
+                messages.append({"role": "user", "content": context})
             messages.append({"role": "user", "content": user_input})
             
             completion = await asyncio.to_thread(
@@ -215,35 +211,27 @@ async def handle_text_message(message: Message, state: FSMContext):
                 messages=messages
             )
             response_text = completion.choices[0].message.content
-            # تحديث السياق (مثال بسيط: إضافة آخر سؤال وجواب)
             new_context = f"{context}\n\nUser: {user_input}\nAI: {response_text}".strip()
             db.update_user_context(user_id, new_context)
 
         elif "GEMINI" in selected_model_name.upper() and config.GEMINI_API_KEY:
-            # استخدام Gemini API
-            model = genai.GenerativeModel(selected_model_name) # أو نموذج محدد مثل "gemini-1.5-flash"
-            # التعامل مع السياق في Gemini (قد يختلف عن OpenAI)
-            chat_history = [] # بناء سجل المحادثة لـ Gemini
+            model = genai.GenerativeModel(selected_model_name)
+            chat_history = []
             if context:
-                 # تحليل السياق وتحويله إلى تنسيق Gemini (user/model roles)
-                 # هذا يتطلب منطقًا أكثر تعقيدًا لتحليل السياق المخزن
-                 pass # سيتم إضافة منطق تحليل السياق هنا
-
-            response = await asyncio.to_thread(model.generate_content, user_input, generation_config=genai.types.GenerationConfig(temperature=0.7)) # إضافة سجل المحادثة إذا تم بناؤه
+                pass
+            response = await asyncio.to_thread(model.generate_content, user_input, generation_config=genai.types.GenerationConfig(temperature=0.7))
             response_text = response.text
-            # تحديث السياق
             new_context = f"{context}\n\nUser: {user_input}\nAI: {response_text}".strip()
             db.update_user_context(user_id, new_context)
             
         elif "CLAUDE" in selected_model_name.upper():
-             response_text = "نموذج Claude غير مدمج بعد."
-             # لا نحدث السياق إذا فشل الاستدعاء
+            response_text = "نموذج Claude غير مدمج بعد."
         elif "DEEPSEEK" in selected_model_name.upper():
-             response_text = "نموذج DeepSeek غير مدمج بعد."
+            response_text = "نموذج DeepSeek غير مدمج بعد."
         elif "PERPLEXITY" in selected_model_name.upper():
-             response_text = "نموذج Perplexity غير مدمج بعد (يستخدم عادةً عبر /s)."
+            response_text = "نموذج Perplexity غير مدمج بعد (يستخدم عادةً عبر /s)."
         else:
-            response_text = f"النموذج المختار 	'{selected_model_name}	' غير مدعوم حاليًا أو لم يتم تكوينه بشكل صحيح."
+            response_text = f"النموذج المختار '{selected_model_name}' غير مدعوم حاليًا أو لم يتم تكوينه بشكل صحيح."
 
     except openai.APIError as e:
         logger.error(f"OpenAI API error for user {user_id}: {e}")
@@ -251,8 +239,6 @@ async def handle_text_message(message: Message, state: FSMContext):
     except Exception as e:
         logger.error(f"Error processing text message for user {user_id} with model {selected_model_name}: {e}")
         response_text = f"عذرًا، حدث خطأ غير متوقع أثناء معالجة طلبك مع نموذج {selected_model_name}."
-        # قد ترغب في إعادة الرصيد للمستخدم هنا إذا كان الخطأ من جانب الخادم
-        # db.increment_user_requests(user_id) # دالة افتراضية لإعادة الرصيد
 
     # 5. إرسال الرد للمستخدم
     await message.reply(response_text)
@@ -271,12 +257,12 @@ async def main():
     for admin_id_str in initial_admins:
         try:
             admin_id = int(admin_id_str)
-            if not db.is_admin(admin_id): # تحقق أولاً إذا كان موجودًا بالفعل (لتجنب الإدخال المكرر)
-                 db.add_admin(admin_id)
+            if not db.is_admin(admin_id):
+                db.add_admin(admin_id)
         except ValueError:
-             logger.warning(f"معرف المسؤول غير صالح في ملف الإعدادات: {admin_id_str}")
+            logger.warning(f"معرف المسؤول غير صالح في ملف الإعدادات: {admin_id_str}")
         except Exception as e:
-             logger.error(f"خطأ عند إضافة المسؤول الأولي {admin_id_str}: {e}")
+            logger.error(f"خطأ عند إضافة المسؤول الأولي {admin_id_str}: {e}")
     logger.info(f"المسؤولون الحاليون (من الإعدادات وقاعدة البيانات): {db.get_all_admins()}")
 
     # إضافة مفاتيح API الأولية من ملف الإعدادات إلى قاعدة البيانات
@@ -285,14 +271,10 @@ async def main():
         db.add_api_key("ChatGPT", config.OPENAI_API_KEY, "ChatGPT (OpenAI)")
     if config.GEMINI_API_KEY:
         db.add_api_key("Gemini", config.GEMINI_API_KEY, "Gemini (Google)")
-    # أضف المزيد من المفاتيح هنا إذا لزم الأمر
     logger.info("تمت معالجة مفاتيح API الأولية.")
-
 
     logger.info("بدء تشغيل البوت...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
