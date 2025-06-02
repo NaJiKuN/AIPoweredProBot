@@ -1,126 +1,298 @@
 # -*- coding: utf-8 -*-
-"""الملف الرئيسي لتشغيل بوت تليجرام AI.
-
-يقوم هذا الملف بتهيئة البوت، تحميل الإعدادات، تسجيل معالجات الأوامر،
-وبدء تشغيل البوت للاستماع إلى الرسائل الواردة.
-"""
-
+import asyncio
 import logging
-import config # استيراد ملف الإعدادات الخاص بنا
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-    ConversationHandler # مستورد ولكن لم يستخدم مباشرة هنا، يستخدم في admin_handler
-)
+import os
+import sqlite3
 
-# استيراد المعالجات والوظائف من الوحدات الأخرى
-from utils import user_manager, database # استيراد database للتحقق من المفاتيح عند البدء
-from handlers import admin, user_commands
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import CommandStart, Command
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# إعداد تسجيل الأحداث (Logging)
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("telegram.vendor.ptb_urllib3.urllib3").setLevel(logging.WARNING)
+import openai
+import google.generativeai as genai
+
+# استيراد الإعدادات وأدوات قاعدة البيانات
+import config
+import database_utils as db
+
+# إعداد التسجيل
+logging.basicConfig(level=logging.INFO, format=\'%(asctime)s - %(name)s - %(levelname)s - %(message)s\')
 logger = logging.getLogger(__name__)
 
-# --- معالجات الأوامر الأساسية المحدثة ---
+# تهيئة البوت والديسباتشر
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
+bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """إرسال رسالة ترحيبية وتسجيل المستخدم عند إرسال أمر /start."""
-    user = update.effective_user
-    user_id = user.id
-    logger.info(f"المستخدم {user.username} (ID: {user_id}) بدأ البوت (/start).")
+# تهيئة عملاء OpenAI و Gemini إذا كانت المفاتيح موجودة
+if config.OPENAI_API_KEY:
+    openai.api_key = config.OPENAI_API_KEY
+    logger.info("تم تهيئة OpenAI API.")
+else:
+    logger.warning("لم يتم العثور على مفتاح OpenAI API في الإعدادات.")
 
-    # تسجيل المستخدم إذا لم يكن موجودًا
-    is_new_user = user_manager.register_user_if_not_exists(user_id, user.username, user.first_name)
-    if is_new_user:
-        logger.info(f"تم تسجيل مستخدم جديد: {user.username} (ID: {user_id})")
-    else:
-        logger.info(f"المستخدم {user.username} (ID: {user_id}) موجود بالفعل.")
+if config.GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=config.GEMINI_API_KEY)
+        logger.info("تم تهيئة Google Generative AI API.")
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة Google Generative AI API: {e}")
+else:
+    logger.warning("لم يتم العثور على مفتاح Gemini API في الإعدادات.")
 
-    # تنسيق الرسالة الترحيبية
-    # (يمكن تحسينها لاحقًا لعرض نماذج محددة متاحة بناءً على المفاتيح المفعلة)
-    free_models_list = ", ".join(config.USAGE_LIMITS["free"]["allowed_models"])
-    welcome_text = config.WELCOME_MESSAGE.format(
-        free_models=free_models_list,
-        free_limits=config.USAGE_LIMITS["free"]["text_requests_weekly"]
-    )
+# --- معالجات الأوامر الأساسية --- #
 
-    await update.message.reply_html(
-        rf"مرحباً {user.mention_html()}!\n{welcome_text}"
-    )
+@dp.message(CommandStart())
+async def handle_start(message: Message):
+    """معالج الأمر /start"""
+    user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    last_name = message.from_user.last_name
+    
+    # إضافة المستخدم أو تحديث بياناته في قاعدة البيانات
+    db.add_or_update_user(user_id, username, first_name, last_name)
+    
+    await message.answer(config.START_MESSAGE)
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """إرسال رسالة المساعدة عند إرسال المستخدم لأمر /help."""
-    user = update.effective_user
-    logger.info(f"المستخدم {user.username} (ID: {user_id}) طلب المساعدة (/help).")
-    await update.message.reply_html(config.HELP_MESSAGE)
+@dp.message(Command("help"))
+async def handle_help(message: Message):
+    """معالج الأمر /help"""
+    user_id = message.from_user.id
+    # التأكد من وجود المستخدم في قاعدة البيانات
+    if not db.get_user(user_id):
+        db.add_or_update_user(user_id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+        
+    await message.answer(config.HELP_MESSAGE, disable_web_page_preview=True)
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """تسجيل الأخطاء التي تحدث بسبب تحديثات Telegram."""
-    logger.error("حدث خطأ غير متوقع:", exc_info=context.error)
-    # يمكن إرسال رسالة للمستخدم في حالة حدوث خطأ معين
-    # if isinstance(context.error, telegram.error.BadRequest):
-    #     # ... التعامل مع خطأ معين
-    #     pass
-    # elif update and isinstance(update, Update) and update.effective_message:
-    #     await update.effective_message.reply_text("عذرًا، حدث خطأ ما. يرجى المحاولة مرة أخرى.")
+@dp.message(Command("account"))
+async def handle_account(message: Message):
+    """معالج الأمر /account"""
+    user_id = message.from_user.id
+    user_data = db.get_user(user_id)
+    
+    if not user_data:
+        # إضافة المستخدم إذا لم يكن موجودًا (احتياطي)
+        db.add_or_update_user(user_id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+        user_data = db.get_user(user_id)
+        if not user_data: # إذا فشلت الإضافة لسبب ما
+             await message.answer("حدث خطأ أثناء جلب بيانات حسابك. يرجى المحاولة مرة أخرى.")
+             return
 
-# --- الوظيفة الرئيسية --- #
+    subscription_type = user_data["subscription_type"]
+    requests_remaining = user_data["requests_remaining"]
+    expiry_date_str = user_data["subscription_expiry"]
+    selected_model = user_data["selected_model"]
 
-def main() -> None:
-    """بدء تشغيل البوت."""
-    logger.info("بدء تهيئة البوت...")
+    # تجديد الرصيد إذا لزم الأمر قبل عرضه
+    db.check_and_decrement_requests(user_id) # استدعاء للتحقق من الصلاحية والتجديد إذا لزم الأمر، لا نخصم هنا
+    user_data = db.get_user(user_id) # إعادة جلب البيانات بعد التحديث المحتمل
+    requests_remaining = user_data["requests_remaining"]
+    subscription_type = user_data["subscription_type"]
+    expiry_date_str = user_data["subscription_expiry"]
 
-    # التحقق من وجود مفاتيح API مفعلة عند البدء
-    enabled_keys = database.get_enabled_api_keys()
-    if not enabled_keys:
-        logger.warning("لا توجد مفاتيح API مفعلة في ملف البيانات. قد لا تعمل وظائف الذكاء الاصطناعي.")
-    else:
-        logger.info(f"تم العثور على {len(enabled_keys)} مفتاح API مفعل.")
+    plan_details = db.get_db_connection().cursor().execute("SELECT request_limit, limit_period FROM subscriptions WHERE plan_name = ?", (subscription_type,)).fetchone()
+    limit_period_ar = {"daily": "يوميًا", "weekly": "أسبوعيًا"}.get(plan_details["limit_period"], "")
+    request_limit = plan_details["request_limit"]
 
-    # إنشاء كائن التطبيق وتمرير توكن البوت إليه
-    application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+    expiry_info = ""
+    if expiry_date_str:
+        try:
+            expiry_date = datetime.strptime(expiry_date_str, 	'%Y-%m-%d %H:%M:%S.%f	')
+            expiry_info = f"\nتنتهي صلاحية الخطة الحالية في: {expiry_date.strftime(	'%Y-%m-%d	')}"
+        except ValueError:
+             expiry_info = f"\nتاريخ انتهاء الصلاحية: {expiry_date_str} (تنسيق غير متوقع)"
 
-    # -- تسجيل معالجات الأوامر للمستخدم العادي --
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("account", user_commands.account_command))
-    application.add_handler(CommandHandler("premium", user_commands.premium_command))
-    application.add_handler(CommandHandler("deletecontext", user_commands.delete_context_command))
-    application.add_handler(CommandHandler("privacy", user_commands.privacy_command))
-    application.add_handler(CommandHandler("model", user_commands.model_command)) # قيد التطوير
-    application.add_handler(CommandHandler("settings", user_commands.settings_command)) # قيد التطوير
-    application.add_handler(CommandHandler("s", user_commands.search_command)) # قيد التطوير
-    application.add_handler(CommandHandler("photo", user_commands.photo_command)) # قيد التطوير
-    application.add_handler(CommandHandler("video", user_commands.video_command))
-    application.add_handler(CommandHandler("suno", user_commands.music_command))
-    application.add_handler(CommandHandler("chirp", user_commands.music_command))
-    application.add_handler(CommandHandler("midjourney", user_commands.midjourney_command))
-    # الأمر /empty غير ضروري عادةً، يمكن للمستخدم ببساطة عدم إرسال شيء
 
-    # -- تسجيل معالج أوامر المسؤولين (ConversationHandler) --
-    application.add_handler(admin.admin_conv_handler)
+    account_info = f"""
+    👤 **حسابي**
 
-    # -- تسجيل معالج الرسائل النصية العامة (يجب أن يكون بعد CommandHandlers) --
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, user_commands.handle_message))
+    **معرف المستخدم:** `{user_id}`
+    **نوع الاشتراك:** {subscription_type.capitalize()} ({request_limit} طلب {limit_period_ar})
+    **الطلبات المتبقية:** {requests_remaining}
+    **النموذج المختار:** {selected_model}
+    {expiry_info}
+    """
+    await message.answer(account_info, parse_mode="Markdown")
 
-    # -- تسجيل معالج الرسائل الصوتية (إذا كان سيتم دعمها) --
-    # application.add_handler(MessageHandler(filters.VOICE, user_commands.handle_voice_message)) # تحتاج لإنشاء هذه الدالة
+@dp.message(Command("deletecontext"))
+async def handle_delete_context(message: Message):
+    """معالج الأمر /deletecontext"""
+    user_id = message.from_user.id
+    db.delete_user_context(user_id)
+    await message.answer("تم حذف سياق المحادثة بنجاح. يمكنك الآن بدء موضوع جديد.")
 
-    # -- تسجيل معالج الأخطاء --
-    application.add_error_handler(error_handler)
+# --- معالجات أوامر المسؤولين (مثال) --- #
 
-    # بدء تشغيل البوت
-    logger.info("بدء تشغيل البوت والاستماع للتحديثات...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+@dp.message(Command("addadmin"))
+async def handle_add_admin(message: Message):
+    user_id = message.from_user.id
+    if not db.is_admin(user_id):
+        await message.reply("ليس لديك الصلاحية لاستخدام هذا الأمر.")
+        return
+
+    try:
+        target_user_id = int(message.text.split()[1])
+        if db.add_admin(target_user_id):
+            await message.reply(f"تمت إضافة المستخدم {target_user_id} كمسؤول بنجاح.")
+        else:
+            await message.reply(f"فشلت إضافة المستخدم {target_user_id} كمسؤول (قد يكون مسؤولاً بالفعل أو حدث خطأ).")
+    except (IndexError, ValueError):
+        await message.reply("الاستخدام: /addadmin <user_id>")
+    except Exception as e:
+        logger.error(f"خطأ عند إضافة مسؤول: {e}")
+        await message.reply("حدث خطأ غير متوقع.")
+
+@dp.message(Command("removeadmin"))
+async def handle_remove_admin(message: Message):
+    user_id = message.from_user.id
+    if not db.is_admin(user_id):
+        await message.reply("ليس لديك الصلاحية لاستخدام هذا الأمر.")
+        return
+
+    try:
+        target_user_id = int(message.text.split()[1])
+        if db.remove_admin(target_user_id):
+            await message.reply(f"تمت إزالة المستخدم {target_user_id} من قائمة المسؤولين بنجاح.")
+        else:
+            await message.reply(f"فشلت إزالة المستخدم {target_user_id} من قائمة المسؤولين (قد لا يكون مسؤولاً أو لا يمكن إزالته).")
+    except (IndexError, ValueError):
+        await message.reply("الاستخدام: /removeadmin <user_id>")
+    except Exception as e:
+        logger.error(f"خطأ عند إزالة مسؤول: {e}")
+        await message.reply("حدث خطأ غير متوقع.")
+
+# --- معالج الرسائل النصية (للتفاعل مع الذكاء الاصطناعي) --- #
+
+@dp.message(F.text & ~F.text.startswith("/"))
+async def handle_text_message(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    user_input = message.text
+
+    # 1. التحقق من وجود المستخدم وتحديث بياناته
+    user_data = db.get_user(user_id)
+    if not user_data:
+        db.add_or_update_user(user_id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+        user_data = db.get_user(user_id)
+        if not user_data: # إذا فشلت الإضافة
+            await message.reply("حدث خطأ في معالجة طلبك. يرجى المحاولة مرة أخرى.")
+            return
+
+    # 2. التحقق من رصيد الطلبات
+    if not db.check_and_decrement_requests(user_id):
+        await message.reply("لقد استهلكت رصيدك من الطلبات لهذا اليوم/الأسبوع. يرجى الترقية إلى /premium أو الانتظار حتى يتم تجديد رصيدك.")
+        return
+
+    # 3. الحصول على النموذج المختار والسياق
+    selected_model_name = db.get_selected_model(user_id)
+    context = db.get_user_context(user_id) or ""
+
+    # 4. استدعاء نموذج الذكاء الاصطناعي المناسب (سيتم إضافة المزيد من النماذج لاحقًا)
+    response_text = "عذرًا، حدث خطأ أثناء معالجة طلبك."
+    try:
+        # عرض رسالة "جارٍ الكتابة..."
+        await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+
+        # --- منطق اختيار واستدعاء النموذج --- #
+        # هذا مثال مبسط، سيتم توسيعه ليشمل جميع النماذج المطلوبة
+        if "GPT" in selected_model_name.upper() and config.OPENAI_API_KEY:
+            # استخدام OpenAI API
+            model_to_use = selected_model_name # أو تعيين نموذج محدد مثل "gpt-4o-mini"
+            messages = []
+            if context: # إضافة السياق إذا كان موجودًا
+                 # تقسيم السياق إلى رسائل المستخدم والردود السابقة (هذا تبسيط)
+                 # في تطبيق حقيقي، قد تحتاج إلى تخزين المحادثة بشكل أكثر تفصيلاً
+                 messages.append({"role": "system", "content": "You are a helpful AI assistant."})
+                 messages.append({"role": "user", "content": context}) # مثال بسيط للسياق
+            messages.append({"role": "user", "content": user_input})
+            
+            completion = await asyncio.to_thread(
+                openai.chat.completions.create,
+                model=model_to_use,
+                messages=messages
+            )
+            response_text = completion.choices[0].message.content
+            # تحديث السياق (مثال بسيط: إضافة آخر سؤال وجواب)
+            new_context = f"{context}\n\nUser: {user_input}\nAI: {response_text}".strip()
+            db.update_user_context(user_id, new_context)
+
+        elif "GEMINI" in selected_model_name.upper() and config.GEMINI_API_KEY:
+            # استخدام Gemini API
+            model = genai.GenerativeModel(selected_model_name) # أو نموذج محدد مثل "gemini-1.5-flash"
+            # التعامل مع السياق في Gemini (قد يختلف عن OpenAI)
+            chat_history = [] # بناء سجل المحادثة لـ Gemini
+            if context:
+                 # تحليل السياق وتحويله إلى تنسيق Gemini (user/model roles)
+                 # هذا يتطلب منطقًا أكثر تعقيدًا لتحليل السياق المخزن
+                 pass # سيتم إضافة منطق تحليل السياق هنا
+
+            response = await asyncio.to_thread(model.generate_content, user_input, generation_config=genai.types.GenerationConfig(temperature=0.7)) # إضافة سجل المحادثة إذا تم بناؤه
+            response_text = response.text
+            # تحديث السياق
+            new_context = f"{context}\n\nUser: {user_input}\nAI: {response_text}".strip()
+            db.update_user_context(user_id, new_context)
+            
+        elif "CLAUDE" in selected_model_name.upper():
+             response_text = "نموذج Claude غير مدمج بعد."
+             # لا نحدث السياق إذا فشل الاستدعاء
+        elif "DEEPSEEK" in selected_model_name.upper():
+             response_text = "نموذج DeepSeek غير مدمج بعد."
+        elif "PERPLEXITY" in selected_model_name.upper():
+             response_text = "نموذج Perplexity غير مدمج بعد (يستخدم عادةً عبر /s)."
+        else:
+            response_text = f"النموذج المختار 	'{selected_model_name}	' غير مدعوم حاليًا أو لم يتم تكوينه بشكل صحيح."
+
+    except openai.APIError as e:
+        logger.error(f"OpenAI API error for user {user_id}: {e}")
+        response_text = f"حدث خطأ في واجهة OpenAI: {e}"
+    except Exception as e:
+        logger.error(f"Error processing text message for user {user_id} with model {selected_model_name}: {e}")
+        response_text = f"عذرًا، حدث خطأ غير متوقع أثناء معالجة طلبك مع نموذج {selected_model_name}."
+        # قد ترغب في إعادة الرصيد للمستخدم هنا إذا كان الخطأ من جانب الخادم
+        # db.increment_user_requests(user_id) # دالة افتراضية لإعادة الرصيد
+
+    # 5. إرسال الرد للمستخدم
+    await message.reply(response_text)
+
+# --- دالة التشغيل الرئيسية --- #
+
+async def main():
+    # تهيئة قاعدة البيانات عند بدء التشغيل
+    logger.info("جارٍ تهيئة قاعدة البيانات...")
+    db.init_db()
+    logger.info("تم تهيئة قاعدة البيانات.")
+
+    # إضافة المسؤولين من ملف الإعدادات إلى قاعدة البيانات إذا لم يكونوا موجودين
+    logger.info("جارٍ التحقق من المسؤولين...")
+    initial_admins = [admin_id for admin_id in config.ADMIN_IDS if admin_id.isdigit()]
+    for admin_id_str in initial_admins:
+        try:
+            admin_id = int(admin_id_str)
+            if not db.is_admin(admin_id): # تحقق أولاً إذا كان موجودًا بالفعل (لتجنب الإدخال المكرر)
+                 db.add_admin(admin_id)
+        except ValueError:
+             logger.warning(f"معرف المسؤول غير صالح في ملف الإعدادات: {admin_id_str}")
+        except Exception as e:
+             logger.error(f"خطأ عند إضافة المسؤول الأولي {admin_id_str}: {e}")
+    logger.info(f"المسؤولون الحاليون (من الإعدادات وقاعدة البيانات): {db.get_all_admins()}")
+
+    # إضافة مفاتيح API الأولية من ملف الإعدادات إلى قاعدة البيانات
+    logger.info("جارٍ إضافة/تحديث مفاتيح API الأولية...")
+    if config.OPENAI_API_KEY:
+        db.add_api_key("ChatGPT", config.OPENAI_API_KEY, "ChatGPT (OpenAI)")
+    if config.GEMINI_API_KEY:
+        db.add_api_key("Gemini", config.GEMINI_API_KEY, "Gemini (Google)")
+    # أضف المزيد من المفاتيح هنا إذا لزم الأمر
+    logger.info("تمت معالجة مفاتيح API الأولية.")
+
+
+    logger.info("بدء تشغيل البوت...")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
+
 
