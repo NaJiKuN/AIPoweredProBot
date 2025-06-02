@@ -74,6 +74,17 @@ def setup_database():
     )
     ''')
     
+    # جدول عمليات شراء الحزم (لتتبع الشراء الشهري)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS package_purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        package_name TEXT,
+        option_index INTEGER,
+        purchase_date TEXT
+    )
+    ''')
+    
     # جدول سياق المحادثة
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS conversation_context (
@@ -113,7 +124,7 @@ def setup_database():
         # إضافة مفتاح Gemini 2.5flash
         cursor.execute(
             "INSERT INTO api_keys (api_name, api_key, added_by, added_date) VALUES (?, ?, ?, datetime('now'))",
-            ("gemini2.5", "AIzaSyAZdRvGnptFullhaGMp0sxM-fr1qhYq7MA", MAIN_ADMIN_ID)
+            ("gemini2.5", "AIzaSyADLvBIJUxbvha5Vhjc_QqO3t5JDtVKrzQ", MAIN_ADMIN_ID)
         )
         
         # إضافة مفتاح GPT-4.1 mini

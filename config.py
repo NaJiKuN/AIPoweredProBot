@@ -115,3 +115,11 @@ BOT_MESSAGES = {
 
 لأي استفسارات، يمكنك مراسلة المسؤول @NaJiMaS"""
 }
+
+# إعدادات نظام الدفع
+PAYMENT_SETTINGS = {
+    "currency": "stars",  # عملة النجوم الخاصة بتليجرام
+    "request_definition": "1 طلب = 1 إدخال سواء كتابة أو صورة أو فيديو أو صوت",
+    "monthly_purchase_limit": True,  # منع تكرار شراء الحزمة خلال الشهر
+    "accumulate_packages": True  # تجميع الحزم في حساب المستخدم
+}
