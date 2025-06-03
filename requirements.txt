@@ -1,4 +1,0 @@
-python-telegram-bot[ext]
-aiosqlite
-# أضف هنا أي مكتبات أخرى قد تحتاجها لواجهات برمجة التطبيقات الفعلية
-# مثل: openai, google-generativeai, anthropic, requests
