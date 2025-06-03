@@ -49,7 +49,7 @@ async def check_and_consume_request(user_id: int, model_name: str, request_type:
 
     if not can_consume:
         if update and context:
-            status = db.get_user_subscription_status(user_id)
+            # status = db.get_user_subscription_status(user_id) # Fetching status here might be redundant if already checked in consume_request
             message = "⚠️ لقد استهلكت رصيدك المتاح لهذا اليوم أو لهذه الحزمة.\n"
             message += " يمكنك الحصول على المزيد من الطلبات عبر /premium."
             # Provide more specific info based on status if needed
@@ -66,7 +66,8 @@ def format_account_status(user_id: int) -> str:
 
     lines = [f"👤 **حساب المستخدم:** {user_id}"]
 
-    if status["is_admin"]:
+    # Use single quotes for dictionary keys for consistency, although double quotes are fine outside f-strings
+    if status['is_admin']:
         lines.append("👑 **الحالة:** مسؤول (وصول غير محدود)")
     else:
         lines.append("**الاشتراك الحالي:**")
@@ -74,29 +75,32 @@ def format_account_status(user_id: int) -> str:
         today = datetime.date.today()
 
         # Premium Status
-        if status["is_premium"]:
+        if status['is_premium']:
             is_subscribed = True
-            expiry = status["premium_expiry"]
+            expiry = status['premium_expiry']
             days_left = (expiry - today).days
             lines.append(f"  💎 **مميز:** نشط حتى {expiry} ({days_left} يوم متبقي)")
-            lines.append(f"     - الحد اليومي: {status["premium_daily_limit"]} طلب")
-            lines.append(f"     - المتبقي اليوم: {status["premium_requests_left_today"]} طلب")
+            # Corrected f-strings below using single quotes for keys
+            lines.append(f"     - الحد اليومي: {status['premium_daily_limit']} طلب")
+            lines.append(f"     - المتبقي اليوم: {status['premium_requests_left_today']} طلب")
 
         # Free Trial Status
-        if status["free_requests_left"] > 0 and status["free_requests_expiry"]:
+        if status['free_requests_left'] > 0 and status['free_requests_expiry']:
             is_subscribed = True
-            expiry = status["free_requests_expiry"]
+            expiry = status['free_requests_expiry']
             days_left = (expiry - today).days
-            lines.append(f"  🎁 **مجاني:** {status["free_requests_left"]} طلب متبقي (ينتهي في {expiry}, {days_left} يوم متبقي)")
+            # Corrected f-string below using single quotes for keys
+            lines.append(f"  🎁 **مجاني:** {status['free_requests_left']} طلب متبقي (ينتهي في {expiry}, {days_left} يوم متبقي)")
 
         # Package Status
-        if status["packages"]:
+        if status['packages']:
             is_subscribed = True
             lines.append("  📦 **الحزم النشطة:**")
-            for pkg in status["packages"]:
+            for pkg in status['packages']:
                 # Make package type more readable
-                pkg_name = pkg["type"].replace("_", " ").title()
-                lines.append(f"     - {pkg_name}: {pkg["left"]}/{pkg["total"]} طلبات متبقية")
+                pkg_name = pkg['type'].replace("_", " ").title()
+                # Corrected f-string below using single quotes for keys
+                lines.append(f"     - {pkg_name}: {pkg['left']}/{pkg['total']} طلبات متبقية")
 
         if not is_subscribed:
             lines.append("  - لا يوجد اشتراك نشط حالياً.")
@@ -115,10 +119,10 @@ def format_api_key_list(keys):
     
     lines = ["🔑 **قائمة مفاتيح API:**\n"] 
     for key_id, service_name, api_key, is_active, added_by, added_at in keys:
-        status = "🟢 نشط" if is_active else "🔴 غير نشط"
+        status_text = "🟢 نشط" if is_active else "🔴 غير نشط"
         mask = api_key[:4] + "..." + api_key[-4:] if api_key and len(api_key) > 8 else "[مفتاح غير صالح]"
         added_at_str = added_at.split('.')[0] if added_at else 'N/A' # Format timestamp
-        lines.append(f"- `{key_id}`: **{service_name}** ({mask}) - {status}")
+        lines.append(f"- `{key_id}`: **{service_name}** ({mask}) - {status_text}")
         # lines.append(f"    *أضيف بواسطة:* {added_by} *في:* {added_at_str}")
     return "\n".join(lines)
 
