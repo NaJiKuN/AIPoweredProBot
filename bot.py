@@ -1,161 +1,165 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
-from database import Database
-from models import AIModels
-from subscriptions import Subscriptions
-from admin import Admin
-from utils import generate_invite_code, get_invite_count, save_context, load_context, clear_context
+# -*- coding: utf-8 -*-
+"""نقطة الدخول الرئيسية لتشغيل بوت التليجرام AI"""
 
-TOKEN = "8063450521:AAH4CjiHMgqEU1SZbY-9sdyr_VE2n_6Bz-g"
-ADMIN_ID = 764559466
+import logging
+import asyncio
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    CallbackQueryHandler,
+    ConversationHandler
+)
 
-db = Database()
-ai_models = AIModels(db)
-subscriptions = Subscriptions(db)
-admin = Admin(db)
+# استيراد الإعدادات
+import config
 
-def start(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    username = update.message.from_user.username
-    db.add_user(user_id, username)
-    if not db.get_user(user_id)[6]:  # إذا لم يكن لديه كود دعوة
-        invite_code = generate_invite_code(user_id)
-        db.update_invite_code(user_id, invite_code)
-    update.message.reply_text(
-        "مرحبًا! يتيح لك الروبوت الوصول إلى أفضل أدوات الذكاء الاصطناعي لإنشاء النصوص والصور والفيديوهات والموسيقى.\n\n"
-        "جرب نماذج متقدمة: OpenAI o3، o4-mini، GPT-4.5، Claude 4، /Midjourney، Flux، /Kling، Pika، /Suno، Grok والمزيد.\n\n"
-        "مجانًا: GPT-4.1 mini، DeepSeek، Gemini 2.5، GPT Images، وبحث الويب Perplexity.\n\n"
-        "كيفية الاستخدام:\n\n"
-        "📝 النص: فقط اطرح سؤالك في الدردشة (اختر نموذج الذكاء الاصطناعي باستخدام /model).\n"
-        "🔎 البحث: انقر على /s للبحث الذكي على الويب.\n"
-        "🌅 الصور: انقر على /photo لبدء إنشاء الصور أو تحريرها.\n"
-        "🎬 الفيديو: انقر على /video لبدء إنشاء مقطع الفيديو الخاص بك (متاح في /premium).\n"
-        "🎸 الموسيقى: انقر على /chirp، واختر نوعًا موسيقيًا، وأضف كلمات الأغنية (متاح في /Suno)."
-    )
+# استيراد وحدات المعالجة (سيتم استكمالها لاحقاً)
+from handlers import start, help, account, premium, settings, admin, ai_models, image_gen, video_gen, audio_gen, web_search, context, other_commands
 
-def account(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    user = db.get_user(user_id)
-    if user:
-        update.message.reply_text(
-            f"حسابك:\n"
-            f"اسم المستخدم: {user[1]}\n"
-            f"الاشتراك: {user[2]}\n"
-            f"الطلبات المتبقية: {user[3]}\n"
-            f"نهاية الاشتراك: {user[4]}\n"
-            f"كود الدعوة: {user[6]}\n"
-            f"عدد المدعوين: {user[7]}"
-        )
-    else:
-        update.message.reply_text("لم يتم العثور على حسابك.")
+# استيراد الأدوات المساعدة (سيتم استكمالها لاحقاً)
+from utils import database_helper, keyboards, message_templates, subscription_manager, api_helper
 
-def premium(update: Update, context: CallbackContext):
-    packages = subscriptions.get_premium_packages()
-    keyboard = []
-    for package in packages:
-        keyboard.append([InlineKeyboardButton(f"{package[1]} - {package[3]} ⭐", callback_data=f'purchase_{package[0]}')])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("اختر خدمة للشراء:", reply_markup=reply_markup)
+# إعداد تسجيل الأحداث (Logging)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
 
-def button_callback(update: Update, context: CallbackContext):
+async def post_init(application: Application) -> None:
+    """أوامر يتم تنفيذها بعد تهيئة البوت وقبل بدء التشغيل."""
+    # يمكنك هنا تعيين أوامر البوت التي تظهر في قائمة الأوامر في تليجرام
+    await application.bot.set_my_commands([
+        ("start", "🚀 حول هذا البوت"),
+        ("account", "👤 حسابي"),
+        ("premium", "⭐ الاشتراك المميز"),
+        ("model", "🧠 اختيار نموذج الذكاء الاصطناعي"),
+        ("settings", "⚙️ إعدادات البوت ونماذج AI"),
+        ("deletecontext", "🧹 حذف السياق"),
+        ("s", "🔍 البحث على الإنترنت"),
+        ("photo", "🖼️ إنشاء الصور"),
+        ("video", "🎬 توليد الفيديو"),
+        ("suno", "🎵 توليد الأغاني"),
+        ("midjourney", "🎨 Midjourney"), # كمثال، يمكن تعديلها لاحقاً
+        ("help", "❓ قائمة الأوامر"),
+        ("privacy", "🔒 شروط الخدمة"),
+        ("empty", "🚫 إبقاء القائمة فارغة"),
+        # أضف أوامر المسؤول هنا إذا أردت أن تظهر في القائمة (قد لا يكون مفضلاً)
+    ])
+    logger.info("Bot commands set successfully.")
+
+async def main() -> None:
+    """الدالة الرئيسية لتشغيل البوت."""
+    logger.info("Starting bot...")
+
+    # تهيئة قاعدة البيانات (سيتم إنشاء الجداول إذا لم تكن موجودة)
+    # يجب التأكد من وجود الدالة initialize_database في database_helper.py
+    try:
+        await database_helper.initialize_database()
+        logger.info("Database initialized successfully.")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        return # لا يمكن تشغيل البوت بدون قاعدة بيانات
+
+    # إنشاء كائن التطبيق
+    application = Application.builder().token(config.TOKEN).post_init(post_init).build()
+
+    # --- تسجيل معالجات الأوامر والرسائل --- 
+    # ملاحظة: هذه مجرد هياكل أولية، سيتم ربطها بالوظائف الفعلية في ملفات handlers
+
+    # أوامر أساسية
+    application.add_handler(CommandHandler("start", start.start_command))
+    application.add_handler(CommandHandler("help", help.help_command))
+    application.add_handler(CommandHandler("account", account.account_command))
+    application.add_handler(CommandHandler("premium", premium.premium_command))
+    application.add_handler(CommandHandler("settings", settings.settings_command))
+    application.add_handler(CommandHandler("privacy", other_commands.privacy_command))
+    application.add_handler(CommandHandler("empty", other_commands.empty_command))
+
+    # أوامر الذكاء الاصطناعي
+    application.add_handler(CommandHandler("model", ai_models.select_model_command))
+    application.add_handler(CommandHandler("deletecontext", context.delete_context_command))
+    application.add_handler(CommandHandler("s", web_search.search_command))
+    application.add_handler(CommandHandler("photo", image_gen.photo_command))
+    application.add_handler(CommandHandler("wow", image_gen.wow_command)) # كمثال لـ GPT-4o Images
+    application.add_handler(CommandHandler("flux", image_gen.flux_command))
+    application.add_handler(CommandHandler("dalle", image_gen.dalle_command))
+    application.add_handler(CommandHandler("imagine", image_gen.imagine_command))
+    application.add_handler(CommandHandler("midjourney", image_gen.imagine_command)) # ربط /midjourney بنفس معالج /imagine
+    application.add_handler(CommandHandler("video", video_gen.video_command))
+    application.add_handler(CommandHandler("suno", audio_gen.suno_command))
+    application.add_handler(CommandHandler("chirp", audio_gen.chirp_command))
+
+    # أوامر المسؤول (سيتم إضافة المزيد من التفاصيل لاحقاً)
+    # يجب إضافة فلتر للتحقق من أن المستخدم هو مسؤول
+    # application.add_handler(CommandHandler("addadmin", admin.add_admin_command, filters=filters.User(user_id=config.ADMIN_IDS)))
+    # application.add_handler(CommandHandler("removeadmin", admin.remove_admin_command, filters=filters.User(user_id=config.ADMIN_IDS)))
+    # ... أوامر إدارة API، الاشتراكات، الإشعارات، الإحصائيات ...
+    # مثال مبدئي لمعالج أوامر المسؤولين
+    admin_handler_group = CommandHandler("admin", admin.admin_panel_command, filters=filters.User(user_id=config.ADMIN_IDS))
+    application.add_handler(admin_handler_group)
+
+    # معالج الرسائل النصية العادية (للتفاعل مع نماذج AI)
+    # يجب أن يكون هذا المعالج ذا أولوية منخفضة ليتم تنفيذه فقط إذا لم يتطابق أي أمر
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_models.handle_text_message))
+
+    # معالج الرسائل الصوتية (للمشتركين المميزين)
+    # application.add_handler(MessageHandler(filters.VOICE, ai_models.handle_voice_message))
+
+    # معالج ردود الأزرار (CallbackQueryHandler)
+    # application.add_handler(CallbackQueryHandler(premium.handle_subscription_callback, pattern="^subscribe_"))
+    # application.add_handler(CallbackQueryHandler(settings.handle_settings_callback, pattern="^setting_"))
+    # application.add_handler(CallbackQueryHandler(admin.handle_admin_callback, pattern="^admin_"))
+    # ... معالجات أخرى لردود الأزرار ...
+    # مثال لمعالج عام لردود الأزرار، يمكن تقسيمه لاحقاً
+    application.add_handler(CallbackQueryHandler(handle_all_callbacks))
+
+    # معالج الأخطاء
+    application.add_error_handler(error_handler)
+
+    # بدء تشغيل البوت
+    logger.info("Running bot...")
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+async def handle_all_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """معالج مؤقت لجميع ردود الأزرار، سيتم تقسيمه لاحقاً."""
     query = update.callback_query
-    query.answer()
-    data = query.data
-    if data.startswith('purchase_'):
-        package_id = int(data.split('_')[1])
-        user_id = query.from_user.id
-        result = subscriptions.purchase_package(user_id, package_id)
-        query.edit_message_text(text=result)
-
-def delete_context(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    clear_context(user_id)
-    update.message.reply_text("تم حذف سياق المحادثة.")
-
-def settings(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    models = ai_models.get_available_models()
-    keyboard = [[InlineKeyboardButton(model, callback_data=f'set_model_{model}')] for model in models]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("اختر نموذج الذكاء الاصطناعي المفضل:", reply_markup=reply_markup)
-
-def set_model_callback(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    model = query.data.split('_')[2]
+    await query.answer() # مهم لإعلام تليجرام بأن الرد تم استلامه
     user_id = query.from_user.id
-    db.update_preferred_model(user_id, model)
-    query.edit_message_text(text=f"تم تعيين {model} كنموذج مفضل.")
+    data = query.data
+    logger.info(f"Received callback query from {user_id} with data: {data}")
 
-def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "📝 إنشاء النص\n"
-        "لإنشاء نص، اكتب طلبك في الدردشة. يمكن للمستخدمين الذين لديهم اشتراك /premium أيضًا إرسال رسائل صوتية.\n"
-        "/s – بحث الويب مع Perplexity\n"
-        "/settings – إعدادات روبوت الدردشة\n"
-        "/model – التبديل بين نماذج الذكاء الاصطناعي\n\n"
-        "💬 استخدام السياق\n"
-        "يحتفظ الروبوت بالسياق افتراضيًا، مما يربط استفسارك الحالي بآخر رد له. هذا يسمح بالحوار وطرح أسئلة متابعة. لبدء موضوع جديد بدون سياق، استخدم أمر /deletecontext.\n\n"
-        "📄 التعرف على الملفات\n"
-        "عند استخدام نموذج Claude، يمكنك العمل مع المستندات. قم بتحميل ملف بتنسيق docx، pdf، xlsx، xls، csv، pptx، txt واطرح أسئلة حول المستند. يستهلك كل طلب 3 عمليات إنشاء من Claude.\n\n"
-        "🌅 إنشاء الصور\n"
-        "ينشئ الروبوت صورًا باستخدام أحدث نماذج Midjourney وChatGPT وFlux. ابدأ بأمر وأضف توجيهك:\n"
-        "/wow – بدء وضع صور GPT-4o\n"
-        "/flux – استخدام Flux\n"
-        "/dalle – استخدام DALL•E 3\n"
-        "/imagine – استخدام Midjourney\n"
-        "└ دليل (https://teletype.in/@gpt4telegrambot/midjourney) لإتقان Midjourney\n\n"
-        "🎸 إنشاء الأغاني\n"
-        "ينشئ الروبوت أغاني باستخدام Suno.\n"
-        "/chirp – إنشاء أغنية؛ سيطلب منك الروبوت اختيار نوع موسيقي وإدخال كلمات الأغنية\n"
-        "/Suno – دليل لإنشاء الأغاني\n\n"
-        "⚙️ أوامر أخرى\n"
-        "/start – وصف الروبوت\n"
-        "/account – ملفك الشخصي والرصيد\n"
-        "/premium – اختيار وشراء اشتراك مميز لـ ChatGPT وClaude وGemini وDALL•E 3 وMidjourney وFlux وSuno\n"
-        "/privacy – شروط الاستخدام وسياسة الخصوصية\n\n"
-        "لأي استفسارات، يمكنك أيضًا مراسلة المسؤول @NaJiMaS"
-    )
+    # هنا سيتم توجيه الرد بناءً على بيانات الزر (data)
+    # مثال:
+    if data.startswith("premium_"):
+        await premium.handle_premium_callback(update, context)
+    elif data.startswith("settings_"):
+        await settings.handle_settings_callback(update, context)
+    elif data.startswith("admin_"):
+        # التحقق من أن المستخدم مسؤول قبل استدعاء وظائف المسؤول
+        if user_id in config.ADMIN_IDS:
+            await admin.handle_admin_callback(update, context)
+        else:
+            await query.edit_message_text(text="ليس لديك صلاحية الوصول لهذه الوظيفة.")
+    elif data.startswith("model_"):
+        await ai_models.handle_model_callback(update, context)
+    # ... إلخ لبقية أنواع الأزرار ...
+    else:
+        await query.edit_message_text(text=f"تم استلام الرد: {data} (المعالج قيد التطوير)")
 
-def message_handler(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    user = db.get_user(user_id)
-    if not user or user[3] <= 0:
-        update.message.reply_text("ليس لديك طلبات متبقية. اشترك باستخدام /premium أو اختر الاشتراك المجاني.")
-        return
-    text = update.message.text
-    preferred_model = user[5] or "GPT-4.1 mini"
-    context_text = load_context(user_id)
-    full_prompt = f"{context_text}\n{text}" if context_text else text
-    response = ai_models.generate_text(preferred_model, full_prompt)
-    save_context(user_id, full_prompt + "\n" + response)
-    db.update_requests_left(user_id, user[3] - 1)
-    update.message.reply_text(response)
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """يسجل الأخطاء التي تسببها التحديثات."""
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
 
-def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+    # يمكنك هنا إرسال رسالة للمستخدم أو للمسؤول لإعلامه بالخطأ
+    # if isinstance(update, Update) and update.effective_message:
+    #     await update.effective_message.reply_text("حدث خطأ ما أثناء معالجة طلبك. يرجى المحاولة مرة أخرى لاحقاً.")
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("account", account))
-    dp.add_handler(CommandHandler("premium", premium))
-    dp.add_handler(CommandHandler("deletecontext", delete_context))
-    dp.add_handler(CommandHandler("settings", settings))
-    dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CallbackQueryHandler(button_callback, pattern='purchase_'))
-    dp.add_handler(CallbackQueryHandler(set_model_callback, pattern='set_model_'))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, message_handler))
+if __name__ == "__main__":
+    # استخدام asyncio.run لتشغيل الدالة main غير المتزامنة
+    asyncio.run(main())
 
-    # إضافة معالجات أوامر المسؤول من admin.py
-    dp.add_handler(CommandHandler("add_admin", admin.add_admin))
-    dp.add_handler(CommandHandler("add_api_key", admin.add_api_key))
-    dp.add_handler(CommandHandler("remove_api_key", admin.remove_api_key))
-    dp.add_handler(CommandHandler("add_package", admin.add_package))
-    dp.add_handler(CommandHandler("broadcast", admin.broadcast))
-    dp.add_handler(CommandHandler("stats", admin.stats))
-
-    updater.start_polling()
-    updater.idle()
-
-if __name__ == '__main__':
-    main()
