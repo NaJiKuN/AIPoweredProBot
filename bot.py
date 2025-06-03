@@ -215,7 +215,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
              if key_data:
                  new_status = not key_data[0]
                  db.update_api_key(int(key_id), is_active=new_status)
-                 await query.edit_message_text(f"✅ تم تغيير حالة المفتاح {key_id} إلى {"نشط" if new_status else "غير نشط"}.")
+                 status_text = 'نشط' if new_status else 'غير نشط'
+                 await query.edit_message_text(f"✅ تم تغيير حالة المفتاح {key_id} إلى {status_text}.")
                  await admin_handlers.manage_keys_command(update, context) # Refresh list
              else:
                  await query.edit_message_text("لم يتم العثور على المفتاح.")
