@@ -298,7 +298,7 @@ def get_user_subscription_status(user_id):
     free_expiry_str = user_data[8] # free_requests_expiry
     if free_expiry_str:
         free_expiry_datetime = datetime.datetime.strptime(free_expiry_str, '%Y-%m-%d')
-        free_expiry_date = free_expiry_datetime.date()
+        free_expiry_date = datetime.date(free_expiry_datetime.year, free_expiry_datetime.month, free_expiry_datetime.day)
         if free_expiry_date >= today:
             status['free_requests_left'] = user_data[7] # free_requests_left
             status['free_requests_expiry'] = free_expiry_date
@@ -312,7 +312,7 @@ def get_user_subscription_status(user_id):
     if premium_expiry_str        premium_expiry_datetime = datetime.datetime.strptime(premium_expiry_str, 
 '%Y-%m-%d
 ')
-        premium_expiry_date = premium_expiry_datetime.date()
+        premium_expiry_date = datetime.date(premium_expiry_datetime.year, premium_expiry_datetime.month, premium_expiry_datetime.day)
         if premium_expiry_date >= today:
             status['is_premium'] = True
             status['premium_expiry'] = premium_expiry_date
