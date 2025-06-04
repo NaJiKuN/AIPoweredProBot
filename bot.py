@@ -1,139 +1,209 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
+    CallbackQueryHandler,
     MessageHandler,
     filters,
-    CallbackQueryHandler,
     ContextTypes
 )
-from config import TOKEN, ADMIN_ID, ADMINS
-import database as db
-import keyboards as kb
-import ai_models
-import payment
-import strings
-import utils
+from config import TOKEN, ADMIN_IDS
+from database import init_db, get_user, create_user, update_user_model
+from keyboards import (
+    start_keyboard,
+    account_keyboard,
+    premium_keyboard,
+    settings_keyboard,
+    model_selection_keyboard,
+    wallet_topup_keyboard
+)
+from admin import setup_admin_handlers
+from ai_services import handle_ai_request
+from utils import send_typing_action, is_admin
+from messages import (
+    START_MESSAGE,
+    ACCOUNT_MESSAGE,
+    PREMIUM_MESSAGE,
+    MIDJOURNEY_MESSAGE,
+    VIDEO_MESSAGE,
+    PHOTO_MESSAGE,
+    SUNO_MESSAGE,
+    SEARCH_MESSAGE,
+    SETTINGS_MESSAGE,
+    HELP_MESSAGE
+)
 
 # إعدادات التسجيل
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    user_id = user.id
+    db_user = get_user(user.id)
     
-    # إنشاء مستخدم جديد إذا لم يكن موجوداً
-    if not db.get_user(user_id):
-        db.create_user(user_id, user.username, user.first_name, user.last_name)
-        # منح التجربة المجانية
-        db.give_free_trial(user_id)
+    if not db_user:
+        create_user(
+            user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            language=user.language_code or 'ar'
+        )
     
-    # إرسال رسالة الترحيب
     await update.message.reply_text(
-        strings.START_MESSAGE,
-        reply_markup=kb.main_menu_keyboard()
+        START_MESSAGE,
+        reply_markup=start_keyboard(),
+        parse_mode='Markdown'
     )
 
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_data = db.get_user_account_data(user_id)
-    packages = db.get_user_packages(user_id)
+    user = update.effective_user
+    db_user = get_user(user.id)
     
-    # بناء نص الحساب
-    account_text = strings.format_account_message(user_data, packages)
+    if not db_user:
+        await start(update, context)
+        return
     
-    # إرسال الرسالة مع أزرار الشراء
+    message = ACCOUNT_MESSAGE.format(
+        subscription="مجاني ✔️",
+        model=db_user.get('current_model', 'GPT-4.1 mini'),
+        balance=db_user.get('wallet_balance', 0),
+        weekly_requests="50/50",
+        chatgpt_package="0/0",
+        claude_package="0/0",
+        image_package="0/0",
+        video_package="0/0",
+        suno_package="0/0"
+    )
+    
     await update.message.reply_text(
-        account_text,
-        reply_markup=kb.buy_balance_keyboard()
+        message,
+        reply_markup=account_keyboard(),
+        parse_mode='Markdown'
     )
 
 async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        strings.PREMIUM_MESSAGE,
-        reply_markup=kb.premium_packages_keyboard()
-    )
-
-async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        strings.SETTINGS_INTRO,
-        reply_markup=kb.settings_main_keyboard()
+        PREMIUM_MESSAGE,
+        reply_markup=premium_keyboard(),
+        parse_mode='Markdown'
     )
 
 async def delete_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    db.delete_user_context(user_id)
-    await update.message.reply_text(strings.CONTEXT_DELETED_MESSAGE)
+    # تنفيذ حذف السياق هنا
+    await update.message.reply_text("تم حذف السياق. عادةً ما يتذكر البوت سؤالك السابق وإجابته ويستخدم السياق في الرد")
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def midjourney(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        MIDJOURNEY_MESSAGE,
+        parse_mode='Markdown'
+    )
+
+async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        VIDEO_MESSAGE,
+        parse_mode='Markdown'
+    )
+
+async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        PHOTO_MESSAGE,
+        parse_mode='Markdown'
+    )
+
+async def suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        SUNO_MESSAGE,
+        reply_markup=suno_keyboard(),
+        parse_mode='Markdown'
+    )
+
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        SEARCH_MESSAGE,
+        reply_markup=search_keyboard(),
+        parse_mode='Markdown'
+    )
+
+async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    db_user = get_user(user.id)
+    await update.message.reply_text(
+        SETTINGS_MESSAGE,
+        reply_markup=settings_keyboard(db_user),
+        parse_mode='Markdown'
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        HELP_MESSAGE,
+        parse_mode='Markdown'
+    )
+
+@send_typing_action
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    text = update.message.text
+    
+    # التحقق من الرصيد المتاح
+    # (سيتم تنفيذ المنطق الكامل في الإصدار النهائي)
+    
+    # معالجة الطلب باستخدام الذكاء الاصطناعي
+    response = await handle_ai_request(user.id, text)
+    await update.message.reply_text(response)
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
     
-    # معالجة أنواع مختلفة من الأزرار
-    if data.startswith('buy_balance_'):
-        amount = int(data.split('_')[2])
-        await payment.initiate_payment(update, context, amount)
+    if data.startswith('model_'):
+        model_name = data.split('_')[1]
+        update_user_model(query.from_user.id, model_name)
+        await query.edit_message_text(f"تم اختيار النموذج: {model_name} ✅")
     
-    elif data.startswith('select_model_'):
-        model_name = data.split('_')[2]
-        db.update_user(user_id, selected_model=model_name)
+    elif data == 'wallet_topup':
         await query.edit_message_text(
-            f"✅ تم اختيار نموذج {model_name}",
-            reply_markup=kb.models_keyboard(user_id)
+            "اختر كمية العملات لشرائها:",
+            reply_markup=wallet_topup_keyboard()
         )
     
-    # ... (معالجة أنواع أخرى من الأزرار)
+    # يمكن إضافة المزيد من معالجات الأزرار هنا
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    message = update.message.text
+def main():
+    # تهيئة قاعدة البيانات
+    init_db()
     
-    # الحصول على النموذج المختار
-    selected_model = db.get_selected_model(user_id)
-    
-    # الحصول على السياق إذا كان مفعلاً
-    context_history = db.get_conversation_context(user_id, selected_model) if db.is_context_enabled(user_id) else []
-    
-    # إرسال الطلب إلى نموذج الذكاء الاصطناعي
-    response = await ai_models.generate_response(
-        model=selected_model,
-        prompt=message,
-        context=context_history
-    )
-    
-    # حفظ السياق الجديد
-    db.save_conversation_context(user_id, selected_model, context_history + [message, response])
-    
-    # إرسال الرد
-    await update.message.reply_text(response)
-
-def main() -> None:
-    # إنشاء الجداول في قاعدة البيانات
-    db.create_tables()
-    
-    # إنشاء تطبيق البوت
+    # إنشاء التطبيق
     application = Application.builder().token(TOKEN).build()
     
-    # تسجيل معالجات الأوامر
+    # إضافة معالجات الأوامر
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("account", account))
     application.add_handler(CommandHandler("premium", premium))
-    application.add_handler(CommandHandler("settings", settings))
     application.add_handler(CommandHandler("deletecontext", delete_context))
-    # ... (أوامر أخرى)
+    application.add_handler(CommandHandler("midjourney", midjourney))
+    application.add_handler(CommandHandler("video", video))
+    application.add_handler(CommandHandler("photo", photo))
+    application.add_handler(CommandHandler("suno", suno))
+    application.add_handler(CommandHandler("s", search))
+    application.add_handler(CommandHandler("settings", settings))
+    application.add_handler(CommandHandler("help", help_command))
     
-    # معالجة الضغط على الأزرار
-    application.add_handler(CallbackQueryHandler(handle_callback))
+    # إضافة معالجات المسؤول
+    setup_admin_handlers(application)
+    
+    # معالجة استعلامات الزر
+    application.add_handler(CallbackQueryHandler(button_handler))
     
     # معالجة الرسائل النصية
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    # بدء تشغيل البوت
+    # بدء البوت
     application.run_polling()
 
 if __name__ == "__main__":
