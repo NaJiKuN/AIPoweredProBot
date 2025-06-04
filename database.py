@@ -11,7 +11,7 @@ def init_db():
     cursor = conn.cursor()
 
     # Users Table
-    cursor.execute("""
+    cursor.execute(
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -29,7 +29,7 @@ def init_db():
         wallet_balance REAL DEFAULT 0.0, -- User's wallet balance in coins/stars
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """)
+    )
 
     # Admins Table (Simplified, main check via config + user table flag)
     # We primarily use the is_admin flag in the users table, 
@@ -42,7 +42,7 @@ def init_db():
     # """)
 
     # API Keys Table
-    cursor.execute("""
+    cursor.execute(
     CREATE TABLE IF NOT EXISTS api_keys (
         key_id INTEGER PRIMARY KEY AUTOINCREMENT,
         service_name TEXT NOT NULL UNIQUE, -- e.g., 'GPT-4o mini', 'Midjourney'
@@ -51,10 +51,10 @@ def init_db():
         added_by INTEGER, -- Admin user_id who added the key
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """)
+    )
 
     # User Packages Table (Tracks purchased one-time packages)
-    cursor.execute("""
+    cursor.execute(
     CREATE TABLE IF NOT EXISTS user_packages (
         package_id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -65,10 +65,10 @@ def init_db():
         expiry_date DATE, -- Optional: if packages expire
         FOREIGN KEY (user_id) REFERENCES users (user_id)
     )
-    """)
+    )
 
     # Usage Stats Table (Optional, for detailed tracking)
-    cursor.execute("""
+    cursor.execute(
     CREATE TABLE IF NOT EXISTS usage_stats (
         usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -78,7 +78,7 @@ def init_db():
         cost INTEGER DEFAULT 1, -- How many 'requests' this action cost
         FOREIGN KEY (user_id) REFERENCES users (user_id)
     )
-    """)
+    )
 
     conn.commit()
     conn.close()
@@ -86,7 +86,7 @@ def init_db():
 
 # --- Helper Function ---
 def _execute_query(query, params=(), fetchone=False, fetchall=False, commit=False):
-    """Executes a given SQL query.
+    Executes a given SQL query.
     
     Args:
         query (str): The SQL query to execute.
@@ -97,7 +97,7 @@ def _execute_query(query, params=(), fetchone=False, fetchall=False, commit=Fals
 
     Returns:
         Result of fetchone/fetchall or None.
-    """
+    
     conn = sqlite3.connect(DATABASE_NAME)
     cursor = conn.cursor()
     try:
@@ -121,7 +121,7 @@ def _execute_query(query, params=(), fetchone=False, fetchall=False, commit=Fals
 def add_or_update_user(user_id, username, first_name, last_name):
     """Adds a new user or updates existing user's info. Sets admin flag if ID is in config."""
     is_admin = 1 if user_id in ADMIN_IDS else 0
-    query = """
+    query = 
     INSERT INTO users (user_id, username, first_name, last_name, is_admin, preferred_model)
     VALUES (?, ?, ?, ?, ?, ?) 
     ON CONFLICT(user_id) DO UPDATE SET
@@ -129,7 +129,7 @@ def add_or_update_user(user_id, username, first_name, last_name):
         first_name=excluded.first_name,
         last_name=excluded.last_name,
         is_admin=excluded.is_admin
-    """
+    
     # Set a default preferred model, e.g., from config
     from config import DEFAULT_MODEL
     _execute_query(query, (user_id, username, first_name, last_name, is_admin, DEFAULT_MODEL), commit=True)
@@ -297,7 +297,8 @@ def get_user_subscription_status(user_id):
     # Check free trial
     free_expiry_str = user_data[8] # free_requests_expiry
     if free_expiry_str:
-        free_expiry_date = datetime.datetime.strptime(free_expiry_str, '%Y-%m-%d').date()
+        free_expiry_datetime = datetime.datetime.strptime(free_expiry_str, '%Y-%m-%d')
+        free_expiry_date = free_expiry_datetime.date()
         if free_expiry_date >= today:
             status['free_requests_left'] = user_data[7] # free_requests_left
             status['free_requests_expiry'] = free_expiry_date
@@ -308,8 +309,8 @@ def get_user_subscription_status(user_id):
 
     # Check premium
     premium_expiry_str = user_data[9] # premium_expiry
-    if premium_expiry_str:
-        premium_expiry_date = datetime.datetime.strptime(premium_expiry_str, '%Y-%m-%d').date()
+    if premium_expiry_str        premium_expiry_datetime = datetime.datetime.strptime(premium_expiry_str, %Y-%m-%d)
+        premium_expiry_date = premium_expiry_datetime.date()
         if premium_expiry_date >= today:
             status['is_premium'] = True
             status['premium_expiry'] = premium_expiry_date
@@ -464,4 +465,3 @@ def deduct_wallet_balance(user_id, amount):
     else:
         print(f"Insufficient balance for user {user_id}. Required: {amount}, Available: {current_balance}")
         return False
-
