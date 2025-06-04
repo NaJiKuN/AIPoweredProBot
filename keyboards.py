@@ -1,48 +1,78 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-import database as db
+from config import SUPPORTED_MODELS, SUBSCRIPTION_PLANS, WALLET_TOP_UP_OPTIONS
 
-def main_menu_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("حسابي /account", callback_data="account")],
-        [InlineKeyboardButton("الاشتراك المميز /premium", callback_data="premium")],
-        [InlineKeyboardButton("إنشاء الصور /photo", callback_data="photo")],
-        [InlineKeyboardButton("توليد الفيديو /video", callback_data="video")],
-        [InlineKeyboardButton("توليد الأغاني /suno", callback_data="suno")],
-        [InlineKeyboardButton("البحث على الإنترنت /s", callback_data="search")],
-        [InlineKeyboardButton("الإعدادات /settings", callback_data="settings")]
-    ])
+def start_keyboard():
+    """لوحة مفاتيح أمر /start"""
+    keyboard = [
+        [InlineKeyboardButton("حسابي 🪪", callback_data="account")],
+        [InlineKeyboardButton("الاشتراكات 💎", callback_data="premium")],
+        [InlineKeyboardButton("إنشاء صور 🖼️", callback_data="photo")],
+        [InlineKeyboardButton("إنشاء فيديو 🎬", callback_data="video")],
+        [InlineKeyboardButton("إنشاء أغنية 🎵", callback_data="suno")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-def buy_balance_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("100 عملة = 110 نجمة", callback_data="buy_balance_100")],
-        [InlineKeyboardButton("200 عملة = 220 نجمة", callback_data="buy_balance_200")],
-        [InlineKeyboardButton("350 عملة = 360 نجمة", callback_data="buy_balance_350")],
-        [InlineKeyboardButton("500 عملة = 510 نجمة", callback_data="buy_balance_500")],
-        [InlineKeyboardButton("1000 عملة = 1000 نجمة", callback_data="buy_balance_1000")]
-    ])
+def account_keyboard():
+    """لوحة مفاتيح أمر /account"""
+    keyboard = [
+        [InlineKeyboardButton("شراء عملات المحفظة 💰", callback_data="wallet_topup")],
+        [InlineKeyboardButton("الاشتراكات 💎", callback_data="premium")],
+        [InlineKeyboardButton("رجوع ↩️", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-def premium_packages_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("الاشتراك المميز | شهري", callback_data="premium_monthly")],
-        [InlineKeyboardButton("الاشتراك المميز X2 | شهري", callback_data="premium_x2")],
-        [InlineKeyboardButton("CHATGPT PLUS | حزم", callback_data="chatgpt_packages")],
-        [InlineKeyboardButton("CLAUDE | حزم", callback_data="claude_packages")],
-        [InlineKeyboardButton("MIDJOURNEY & FLUX | حزم", callback_data="midjourney_packages")],
-        [InlineKeyboardButton("فيديو | حزم", callback_data="video_packages")],
-        [InlineKeyboardButton("أغاني SUNO | حزم", callback_data="suno_packages")],
-        [InlineKeyboardButton("كومبو | شهري 🔥", callback_data="combo_package")]
-    ])
-
-def models_keyboard(user_id):
-    active_models = db.get_active_models()
-    selected_model = db.get_selected_model(user_id)
+def premium_keyboard():
+    """لوحة مفاتيح الاشتراكات"""
+    keyboard = []
+    for plan_id, plan in SUBSCRIPTION_PLANS.items():
+        if plan_id == "free":
+            continue
+        text = f"{plan['name']} - {plan['price']} ⭐"
+        keyboard.append([InlineKeyboardButton(text, callback_data=f"buy_{plan_id}")])
     
-    buttons = []
-    for model in active_models:
-        prefix = "✅ " if model == selected_model else ""
-        buttons.append([InlineKeyboardButton(f"{prefix}{model}", callback_data=f"select_model_{model}")])
-    
-    buttons.append([InlineKeyboardButton("رجوع", callback_data="back_to_settings")])
-    return InlineKeyboardMarkup(buttons)
+    keyboard.append([InlineKeyboardButton("رجوع ↩️", callback_data="main_menu")])
+    return InlineKeyboardMarkup(keyboard)
 
-# ... (لوحات مفاتيح أخرى)
+def wallet_topup_keyboard():
+    """لوحة مفاتيح شراء العملات"""
+    keyboard = []
+    for amount, stars in WALLET_TOP_UP_OPTIONS.items():
+        text = f"{amount} عملة = {stars} نجمة"
+        keyboard.append([InlineKeyboardButton(text, callback_data=f"topup_{amount}")])
+    
+    keyboard.append([InlineKeyboardButton("رجوع ↩️", callback_data="account")])
+    return InlineKeyboardMarkup(keyboard)
+
+def model_selection_keyboard(current_model=None):
+    """لوحة اختيار النماذج"""
+    keyboard = []
+    for model in SUPPORTED_MODELS:
+        # التحقق من توفر النموذج (سيتم استكماله لاحقًا)
+        is_available = True  # مؤقت
+        if is_available:
+            text = model
+            if current_model == model:
+                text = f"✅ {model}"
+            keyboard.append([InlineKeyboardButton(text, callback_data=f"model_{model}")])
+    
+    keyboard.append([InlineKeyboardButton("رجوع ↩️", callback_data="settings")])
+    return InlineKeyboardMarkup(keyboard)
+
+def suno_keyboard():
+    """لوحة مفاتيح Suno"""
+    keyboard = [
+        [InlineKeyboardButton("شراء حزمة Suno", callback_data="buy_suno")],
+        [InlineKeyboardButton("بدء الإنشاء", callback_data="start_suno")],
+        [InlineKeyboardButton("رجوع ↩️", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def search_keyboard():
+    """لوحة مفاتيح البحث"""
+    keyboard = [
+        [InlineKeyboardButton("Deep Research", callback_data="model_deepresearch")],
+        [InlineKeyboardButton("Perplexity", callback_data="model_perplexity")],
+        [InlineKeyboardButton("Google", callback_data="model_google")],
+        [InlineKeyboardButton("رجوع ↩️", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
