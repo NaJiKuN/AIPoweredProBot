@@ -1,0 +1,5 @@
+python-telegram-bot[job-queue]==22.1
+apscheduler
+google-generativeai
+# Add other dependencies here if needed (e.g., openai, anthropic, requests for Plisio)
+
