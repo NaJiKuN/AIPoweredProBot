@@ -1,30 +1,28 @@
-# -*- coding: utf-8 -*-
 import os
 
-# Load environment variables or use defaults
-TOKEN = os.getenv("BOT_TOKEN", "8063450521:AAH4CjiHMgqEU1SZbY-9sdyr_VE2n_6Bz-g")
-# Initial admin ID, can be a list of strings or integers
-INITIAL_ADMIN_IDS = ["764559466"] 
-
-# Database configuration
-DATABASE_NAME = "aipoweredprobot.db"
-
-# Other configurations can be added here
-# For example, default model, API endpoints (placeholders for now)
-DEFAULT_MODEL = "GPT-4o mini"
-
-# Convert admin IDs to integers for consistency
-try:
-    ADMIN_IDS = [int(admin_id) for admin_id in INITIAL_ADMIN_IDS]
-except ValueError:
-    print("Error: One or more ADMIN_IDs are not valid integers. Please check INITIAL_ADMIN_IDS.")
-    ADMIN_IDS = [] # Or handle the error as appropriate
-
-if not TOKEN:
-    raise ValueError("Bot token not found. Please set the BOT_TOKEN environment variable or add it directly to config.py")
-
-print("Configuration loaded.")
-
-
+# إعدادات أساسية
+TOKEN = "8063450521:AAH4CjiHMgqEU1SZbY-9sdyr_VE2n_6Bz-g"
+ADMIN_ID = 764559466
 PLISIO_SECRET_KEY = "Z468hRlbDPX7nIUdi2OYVsfAkTa9XUQNCwmxxAbyG9YVdCW4_tH6xPuVcaq8vPnO"
 
+# مسارات الملفات
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'data', 'bot_data.db')
+
+# قائمة المسؤولين
+ADMINS = [ADMIN_ID]
+
+# نماذج الذكاء الاصطناعي الافتراضية
+DEFAULT_MODELS = {
+    "ChatGPT": "",
+    "GPT-4.1 mini": "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",
+    "GPT-4": "",
+    "GPT-4o mini": "",
+    "GPT-4o": "",
+    "Claude": "",
+    "Gemini2.5": "AIzaSyADLvBIJUxbvha5Vhjc_QqO3t5JDtVKrzQ",
+    "DeepSeek-V3": "",
+    "Perplexity": "",
+    "Midjourney": "",
+    "Flux": ""
+}
